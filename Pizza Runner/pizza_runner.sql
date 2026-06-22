@@ -130,15 +130,116 @@ UPDATE runner_orders
 SET distance = NULL
 WHERE distance = 'null';
 
+-- Rename Column distance
+ALTER TABLE runner_orders RENAME COLUMN distance TO distance_in_km;
+
+-- Clean duration column 
 SELECT * FROM runner_orders;
 
+SELECT * FROM runner_orders
+WHERE duration = 'null';
 
+UPDATE runner_orders
+SET duration = NULL
+WHERE duration = 'null';
 
+SELECT duration,
+REGEXP_REPLACE(duration, '[^0-9.]', '', 'g') as new_duration
+FROM runner_orders;
 
+UPDATE runner_orders
+SET duration = REGEXP_REPLACE(duration, '[^0-9.]', '', 'g')
+WHERE duration IS NOT NULL;
 
+ALTER TABLE runner_orders RENAME COLUMN duration to duration_in_minutes;
 
+-- Clean Cancellation Column
+UPDATE runner_orders
+SET cancellation = NULL
+WHERE cancellation = '' 
+	OR cancellation = 'null';
+	
+SELECT * FROM runner_orders;
 
+-- A. Pizza Metrics
+SELECT * FROM customer_orders;
 
+-- How many pizzas were ordered?
+SELECT COUNT(*) FROM customer_orders;
 
+-- How many unique customer orders were made?
+SELECT COUNT(*)
+FROM (
+	SELECT customer_id, COUNT(*) 
+	FROM customer_orders
+	GROUP BY customer_id
+);
+
+-- How many successful orders were delivered by each runner?
+SELECT runner_id, COUNT(*) FROM runner_orders
+WHERE cancellation IS NULL
+GROUP BY runner_id;
+
+-- How many of each type of pizza was delivered?
+SELECT pizza_name, COUNT(*)
+FROM (
+	SELECT ro.order_id, co.pizza_id, pn.pizza_name
+	FROM runner_orders ro
+	JOIN customer_orders co ON ro.order_id = co.order_id
+	JOIN pizza_names pn ON co.pizza_id = pn.pizza_id
+	WHERE ro.cancellation IS NULL
+)
+GROUP BY pizza_name;
+
+-- How many Vegetarian and Meatlovers were ordered by each customer?
+SELECT co.customer_id, pn.pizza_name, COUNT(*) as total_ordered
+	FROM customer_orders co
+	JOIN pizza_names pn ON co.pizza_id = pn.pizza_id
+	GROUP BY co.customer_id, pn.pizza_name;
+
+-- What was the maximum number of pizzas delivered in a single order?
+SELECT order_id, COUNT(*)
+FROM (
+	SELECT ro.order_id, co.pizza_id, pn.pizza_name
+	FROM runner_orders ro
+	JOIN customer_orders co ON ro.order_id = co.order_id
+	JOIN pizza_names pn ON co.pizza_id = pn.pizza_id
+)
+GROUP BY order_id
+ORDER BY COUNT(*) DESC
+LIMIT 1;
+	
+-- For each customer, how many delivered pizzas had at least 1 
+-- change and how many had no changes?
+SELECT customer_id,
+SUM(CASE WHEN exclusions = 'None' AND extras = 'None' THEN 1 ELSE 0 END)
+	AS nonchanged_pizzas_count,
+SUM(CASE WHEN exclusions NOT IN ('None') OR extras NOT IN ('None') THEN 1 ELSE 0 END)
+	AS changed_pizzas_count
+FROM customer_orders co
+JOIN (SELECT * FROM runner_orders WHERE cancellation IS NULL) AS ro
+	ON co.order_id = ro.order_id
+GROUP BY (co.customer_id);
+
+-- How many pizzas were delivered that had both exclusions and extras?
+SELECT COUNT(*)
+FROM customer_orders co
+JOIN runner_orders ro ON co.order_id = ro.order_id
+WHERE
+	ro.cancellation IS NULL
+	AND (co.exclusions != 'None')
+	AND(co.extras != 'None');
+
+-- What was the total volume of pizzas ordered for each hour of the day?
+SELECT EXTRACT(HOUR FROM order_time), COUNT(*)
+FROM customer_orders
+GROUP BY EXTRACT(HOUR FROM order_time)
+ORDER BY COUNT(*) DESC;
+
+-- What was the volume of orders for each day of the week?
+SELECT TO_CHAR(order_time, 'FMDAY'), COUNT(*)
+FROM customer_orders
+GROUP BY TO_CHAR(order_time, 'FMDAY')
+ORDER BY COUNT(*) DESC;
 
   

@@ -133,6 +133,10 @@ WHERE distance = 'null';
 -- Rename Column distance
 ALTER TABLE runner_orders RENAME COLUMN distance TO distance_in_km;
 
+-- Change type of column distance_in_km to Integer
+ALTER TABLE runner_orders
+ALTER COLUMN distance_in_km TYPE DECIMAL(4, 2) USING distance_in_km::DECIMAL;
+
 -- Clean duration column 
 SELECT * FROM runner_orders;
 
@@ -152,6 +156,8 @@ SET duration = REGEXP_REPLACE(duration, '[^0-9.]', '', 'g')
 WHERE duration IS NOT NULL;
 
 ALTER TABLE runner_orders RENAME COLUMN duration to duration_in_minutes;
+ALTER TABLE runner_orders 
+ALTER COLUMN duration_in_minutes TYPE INTEGER USING duration_in_minutes::INTEGER;
 
 -- Clean Cancellation Column
 UPDATE runner_orders
@@ -242,4 +248,62 @@ FROM customer_orders
 GROUP BY TO_CHAR(order_time, 'FMDAY')
 ORDER BY COUNT(*) DESC;
 
-  
+
+		-- B. Runner and Customer Experience
+-- How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+SELECT 
+    -- 1. Calculate the start of each custom 1-week bucket
+    '2021-01-01'::date + ((registration_date - '2021-01-01'::date) / 7) * 7 AS week_start,
+    -- 2. Count the runners in that bucket
+    COUNT(*) AS runner_count
+FROM runners
+WHERE registration_date >= '2021-01-01'
+GROUP BY week_start
+ORDER BY week_start ASC;
+
+-- What was the average time in minutes it took for each runner to arrive at 
+-- the Pizza Runner HQ to pickup the order?
+SELECT * FROM runner_orders;
+SELECT * FROM customer_orders;
+
+SELECT ROUND(AVG(minutes_difference)) AS average_time_in_minutes
+FROM (
+	SELECT ro.runner_id,
+		EXTRACT(EPOCH FROM (ro.pickup_time::TIMESTAMP - co.order_time::TIMESTAMP)) / 60 AS minutes_difference
+	FROM customer_orders co
+	JOIN runner_orders ro ON co.order_id = ro.order_id
+	WHERE ro.pickup_time::DATE IS NOT NULL OR  co.order_time::DATE IS NOT NULL
+);
+-- Is there any relationship between the number of pizzas 
+-- and how long the order takes to prepare?
+-- Yes, there is a relationship between the number of pizzas and how 
+-- long the order takes to prepare.
+WITH order_summary AS (
+    SELECT co.order_id,
+        COUNT(co.pizza_id) AS pizza_count,
+        EXTRACT(EPOCH FROM (ro.pickup_time::timestamp - co.order_time::timestamp)) / 60 AS prep_minutes
+    FROM customer_orders co
+    JOIN runner_orders ro ON co.order_id = ro.order_id
+    WHERE ro.pickup_time IS NOT NULL
+    GROUP BY co.order_id, ro.pickup_time, co.order_time
+)
+SELECT 
+    ROUND(CORR(prep_minutes, pizza_count)::numeric, 4) AS correlation_coefficient
+FROM order_summary;
+
+-- What was the average distance travelled for each customer?
+SELECT co.customer_id, ROUND(AVG(ro.distance_in_km),2) AS average_distance
+FROM customer_orders co
+JOIN runner_orders ro ON co.order_id = ro.order_id
+WHERE ro.distance_in_km IS NOT NULL
+GROUP BY co.customer_id;
+
+-- What was the difference between the longest and shortest delivery times for all orders?
+SELECT * FROM runner_orders;
+SELECT * FROM customer_orders;
+
+ALTER TABLE runner_orders
+ALTER COLUMN duration_in_minutes TYPE INTEGER USING duration_in_minutes::INTEGER;
+
+SELECT MAX(duration_in_minutes) - MIN(duration_in_minutes) AS difference
+FROM runner_orders;

@@ -325,3 +325,32 @@ SELECT
 FROM runner_orders
 GROUP BY runner_id
 ORDER BY runner_id;
+
+
+			-- C. Ingredient Optimisation
+    -- What are the standard ingredients for each pizza?
+SELECT * FROM pizza_recipes;
+SELECT * FROM pizza_names;
+SELECT * FROM pizza_toppings;
+
+SELECT pizza_id, 
+	UNNEST(STRING_TO_ARRAY(toppings, ','))::INTEGER AS topping_id
+FROM pizza_recipes;
+
+SELECT cte.pizza_name,
+	string_agg(ptt.topping_name, ', ' ORDER BY ptt.topping_name) AS standard_ingredients
+FROM (
+	SELECT pn.pizza_name, pr.pizza_id, pt.topping_id
+	FROM pizza_names pn
+	JOIN pizza_recipes pr ON pn.pizza_id = pr.pizza_id 
+	JOIN (SELECT pizza_id, 
+		UNNEST(STRING_TO_ARRAY(toppings, ','))::INTEGER AS topping_id
+		FROM pizza_recipes) pt ON pn.pizza_id = pt.pizza_id
+) cte
+JOIN pizza_toppings ptt ON cte.topping_id = ptt.topping_id
+GROUP BY cte.pizza_name
+ORDER BY cte.pizza_name;
+	
+
+    -- What was the most commonly added extra?
+    -- What was the most common exclusion?

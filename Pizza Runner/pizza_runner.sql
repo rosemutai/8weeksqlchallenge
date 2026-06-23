@@ -266,14 +266,15 @@ ORDER BY week_start ASC;
 SELECT * FROM runner_orders;
 SELECT * FROM customer_orders;
 
-SELECT ROUND(AVG(minutes_difference)) AS average_time_in_minutes
+SELECT  runner_id, ROUND(AVG(minutes_difference)) AS average_time_in_minutes
 FROM (
 	SELECT ro.runner_id,
 		EXTRACT(EPOCH FROM (ro.pickup_time::TIMESTAMP - co.order_time::TIMESTAMP)) / 60 AS minutes_difference
 	FROM customer_orders co
 	JOIN runner_orders ro ON co.order_id = ro.order_id
 	WHERE ro.pickup_time::DATE IS NOT NULL OR  co.order_time::DATE IS NOT NULL
-);
+)
+GROUP BY runner_id;
 -- Is there any relationship between the number of pizzas 
 -- and how long the order takes to prepare?
 -- Yes, there is a relationship between the number of pizzas and how 
@@ -299,11 +300,28 @@ WHERE ro.distance_in_km IS NOT NULL
 GROUP BY co.customer_id;
 
 -- What was the difference between the longest and shortest delivery times for all orders?
-SELECT * FROM runner_orders;
-SELECT * FROM customer_orders;
-
 ALTER TABLE runner_orders
 ALTER COLUMN duration_in_minutes TYPE INTEGER USING duration_in_minutes::INTEGER;
 
 SELECT MAX(duration_in_minutes) - MIN(duration_in_minutes) AS difference
 FROM runner_orders;
+
+-- What was the average speed for each runner for each delivery and do you
+-- notice any trend for these values?
+SELECT runner_id, distance_in_km, duration_in_minutes,
+	ROUND((distance_in_km / (duration_in_minutes::numeric/60)),2) AS speedKMH
+FROM runner_orders
+WHERE cancellation IS NULL
+GROUP BY runner_id, distance_in_km, duration_in_minutes
+ORDER BY distance_in_km  DESC;
+
+-- What is the successful delivery percentage for each runner?
+SELECT 
+    runner_id,
+    ROUND(
+        100.0 * SUM(CASE WHEN distance_in_km IS NOT NULL THEN 1 ELSE 0 END) 
+        / COUNT(*)
+    ) AS success_percentage
+FROM runner_orders
+GROUP BY runner_id
+ORDER BY runner_id;

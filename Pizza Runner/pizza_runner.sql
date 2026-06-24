@@ -329,10 +329,6 @@ ORDER BY runner_id;
 
 			-- C. Ingredient Optimisation
     -- What are the standard ingredients for each pizza?
-SELECT * FROM pizza_recipes;
-SELECT * FROM pizza_names;
-SELECT * FROM pizza_toppings;
-
 SELECT pizza_id, 
 	UNNEST(STRING_TO_ARRAY(toppings, ','))::INTEGER AS topping_id
 FROM pizza_recipes;
@@ -352,5 +348,92 @@ GROUP BY cte.pizza_name
 ORDER BY cte.pizza_name;
 	
 
-    -- What was the most commonly added extra?
-    -- What was the most common exclusion?
+ -- What was the most commonly added extra?
+SELECT * FROM pizza_recipes;
+SELECT * FROM pizza_names;
+SELECT * FROM pizza_toppings;
+SELECT * FROM customer_orders;
+
+SELECT toppings_id, COUNT(*)
+FROM (
+	SELECT extras, toppings_id
+	FROM customer_orders,
+	LATERAL UNNEST(STRING_TO_ARRAY(extras, ',')) AS toppings_id
+	WHERE toppings_id != 'None'
+)
+GROUP BY toppings_id
+ORDER BY COUNT(*) DESC
+LIMIT 1;
+
+-- What was the most common exclusion?
+SELECT toppings_id, COUNT(*)
+FROM (
+	SELECT exclusions, toppings_id
+		FROM customer_orders,
+		LATERAL UNNEST(STRING_TO_ARRAY(exclusions, ',')) AS toppings_id
+		WHERE toppings_id != 'None'
+)
+
+GROUP BY toppings_id
+ORDER BY COUNT(*) DESC
+LIMIT 1;
+
+
+-- Generate an order item for each record in the customers_orders table in 
+-- the format of one of the following:
+--     Meat Lovers
+--     Meat Lovers - Exclude Beef
+--     Meat Lovers - Extra Bacon
+--     Meat Lovers - Exclude Cheese, Bacon - Extra Mushroom, Peppers
+SELECT * FROM customer_orders;
+SELECT * FROM pizza_names;
+SELECT * FROM pizza_toppings;
+
+;
+
+WITH order_items_cte AS (
+	SELECT pee.order_id,
+		CASE
+			WHEN exclusion_toping_id = 'None' OR extra_toping_id = 'None' THEN pn.pizza_name
+			WHEN exclusion_toping_id != 'None' 
+				THEN  CONCAT(pn.pizza_name, ' ', '- ', 'Exclude', ' ', STRING_AGG(pt.topping_name, ','))
+			WHEN extra_toping_id != 'None' 
+				THEN CONCAT(pn.pizza_name, ' ', '- ', 'Extra', ' ', pt.topping_name)
+			
+		END AS order_item
+	FROM (
+		SELECT order_id, pizza_id, exclusions, extras, exclusion_toping_id, extra_toping_id
+		FROM customer_orders,
+		LATERAL UNNEST(STRING_TO_ARRAY(exclusions, ',')) AS exclusion_toping_id,
+		LATERAL UNNEST(STRING_TO_ARRAY(extras, ',')) AS extra_toping_id
+	)pee
+	JOIN pizza_names pn ON pee.pizza_id = pn.pizza_id
+	JOIN pizza_toppings pt 
+		ON (pee.exclusion_toping_id = pt.topping_id::TEXT) 
+		OR (pee.extra_toping_id = pt.topping_id::TEXT)
+	GROUP BY pee.order_id, pee.exclusion_toping_id, pee.extra_toping_id, pn.pizza_name,
+		pt.topping_name
+)
+SELECT * FROM order_items_cte;
+	
+WITH exclusion_toppings AS (
+SELECT * FROM (
+		SELECT order_id, pizza_id, exclusions, exclusion_toping_id,
+		FROM customer_orders,
+		LATERAL UNNEST(STRING_TO_ARRAY(exclusions, ',')) AS exclusion_toping_id,
+)),
+extras_toppings AS SELECT * FROM (
+		SELECT order_id, pizza_id, extras, extra_toping_id
+		FROM customer_orders,
+		LATERAL UNNEST(STRING_TO_ARRAY(extras, ',')) AS extra_toping_id
+)
+SELECT *
+FROM exclusion_toppings,
+JOIN extras_toppings extras ON	exclusions.order_id = extras.order_id;
+
+-- Generate an alphabetically ordered comma separated ingredient list for each pizza 
+-- order from the customer_orders table and add a 2x in front of any relevant ingredients
+    -- For example: "Meat Lovers: 2xBacon, Beef, ... , Salami"
+
+-- What is the total quantity of each ingredient used in all delivered 
+-- pizzas sorted by most frequent first?

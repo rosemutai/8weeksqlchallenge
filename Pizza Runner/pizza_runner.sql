@@ -389,47 +389,67 @@ SELECT * FROM customer_orders;
 SELECT * FROM pizza_names;
 SELECT * FROM pizza_toppings;
 
-;
+-- Step 1: Add a unique row identifier to isolate each individual pizza item
+WITH customer_orders_indexed AS (
+    SELECT 
+        ROW_NUMBER() OVER(ORDER BY order_id, pizza_id) AS row_id,
+        order_id,
+        customer_id,
+        pizza_id,
+        -- Clean up 'null' text strings to actual SQL NULLs
+        NULLIF(NULLIF(exclusions, ''), 'null') AS exclusions,
+        NULLIF(NULLIF(extras, ''), 'null') AS extras
+    FROM customer_orders
+),
 
-WITH order_items_cte AS (
-	SELECT pee.order_id,
-		CASE
-			WHEN exclusion_toping_id = 'None' OR extra_toping_id = 'None' THEN pn.pizza_name
-			WHEN exclusion_toping_id != 'None' 
-				THEN  CONCAT(pn.pizza_name, ' ', '- ', 'Exclude', ' ', STRING_AGG(pt.topping_name, ','))
-			WHEN extra_toping_id != 'None' 
-				THEN CONCAT(pn.pizza_name, ' ', '- ', 'Extra', ' ', pt.topping_name)
-			
-		END AS order_item
-	FROM (
-		SELECT order_id, pizza_id, exclusions, extras, exclusion_toping_id, extra_toping_id
-		FROM customer_orders,
-		LATERAL UNNEST(STRING_TO_ARRAY(exclusions, ',')) AS exclusion_toping_id,
-		LATERAL UNNEST(STRING_TO_ARRAY(extras, ',')) AS extra_toping_id
-	)pee
-	JOIN pizza_names pn ON pee.pizza_id = pn.pizza_id
-	JOIN pizza_toppings pt 
-		ON (pee.exclusion_toping_id = pt.topping_id::TEXT) 
-		OR (pee.extra_toping_id = pt.topping_id::TEXT)
-	GROUP BY pee.order_id, pee.exclusion_toping_id, pee.extra_toping_id, pn.pizza_name,
-		pt.topping_name
+-- Step 2: Unnest and map exclusion IDs to their text names
+exclusions_mapped AS (
+    SELECT 
+        co.row_id,
+        STRING_AGG(pt.topping_name, ', ') AS excluded_toppings
+    FROM customer_orders_indexed co
+    CROSS JOIN LATERAL UNNEST(STRING_TO_ARRAY(co.exclusions, ',')) AS ex_id
+    JOIN pizza_toppings pt ON TRIM(ex_id) = pt.topping_id::TEXT
+    GROUP BY co.row_id
+),
+
+-- Step 3: Unnest and map extra IDs to their text names
+extras_mapped AS (
+    SELECT 
+        co.row_id,
+        STRING_AGG(pt.topping_name, ', ') AS extra_toppings
+    FROM customer_orders_indexed co
+    CROSS JOIN LATERAL UNNEST(STRING_TO_ARRAY(co.extras, ',')) AS ext_id
+    JOIN pizza_toppings pt ON TRIM(ext_id) = pt.topping_id::TEXT
+    GROUP BY co.row_id
 )
-SELECT * FROM order_items_cte;
-	
-WITH exclusion_toppings AS (
-SELECT * FROM (
-		SELECT order_id, pizza_id, exclusions, exclusion_toping_id,
-		FROM customer_orders,
-		LATERAL UNNEST(STRING_TO_ARRAY(exclusions, ',')) AS exclusion_toping_id,
-)),
-extras_toppings AS SELECT * FROM (
-		SELECT order_id, pizza_id, extras, extra_toping_id
-		FROM customer_orders,
-		LATERAL UNNEST(STRING_TO_ARRAY(extras, ',')) AS extra_toping_id
-)
-SELECT *
-FROM exclusion_toppings,
-JOIN extras_toppings extras ON	exclusions.order_id = extras.order_id;
+
+-- Step 4: Stitch everything together using CASE WHEN on the aggregated strings
+SELECT 
+    pn.pizza_name,
+    CASE 
+        -- Scenario 1: Both exclusions and extras exist
+        WHEN em.excluded_toppings != 'None' AND exm.extra_toppings != 'None' 
+            THEN CONCAT(pn.pizza_name, ' - Exclude ', em.excluded_toppings, ' - Extra ', exm.extra_toppings)
+        
+        -- Scenario 2: Only exclusions exist
+        WHEN em.excluded_toppings != 'None'
+            THEN CONCAT(pn.pizza_name, ' - Exclude ', em.excluded_toppings)
+        
+        -- Scenario 3: Only extras exist
+        WHEN exm.extra_toppings != 'None'
+            THEN CONCAT(pn.pizza_name, ' - Extra ', exm.extra_toppings)
+        
+        -- Scenario 4: Standard pizza (No alterations)
+        ELSE pn.pizza_name 
+    END AS order_item
+FROM customer_orders_indexed co
+JOIN pizza_names pn ON co.pizza_id = pn.pizza_id
+LEFT JOIN exclusions_mapped em ON co.row_id = em.row_id
+LEFT JOIN extras_mapped exm ON co.row_id = exm.row_id
+ORDER BY co.row_id;
+
+
 
 -- Generate an alphabetically ordered comma separated ingredient list for each pizza 
 -- order from the customer_orders table and add a 2x in front of any relevant ingredients

@@ -385,6 +385,7 @@ LIMIT 1;
 --     Meat Lovers - Exclude Beef
 --     Meat Lovers - Extra Bacon
 --     Meat Lovers - Exclude Cheese, Bacon - Extra Mushroom, Peppers
+
 SELECT * FROM customer_orders;
 SELECT * FROM pizza_names;
 SELECT * FROM pizza_toppings;
@@ -454,6 +455,57 @@ ORDER BY co.row_id;
 -- Generate an alphabetically ordered comma separated ingredient list for each pizza 
 -- order from the customer_orders table and add a 2x in front of any relevant ingredients
     -- For example: "Meat Lovers: 2xBacon, Beef, ... , Salami"
+	
+WITH exploded_ingredients AS (
+    -- Step 1: Break down the comma-separated toppings from the recipe table
+    -- and clean up customer exclusions and extras
+    SELECT 
+        co.order_id,
+        co.pizza_id,
+        pn.pizza_name,
+        TRIM(UNNEST(STRING_TO_ARRAY(pr.toppings, ',')))::INTEGER AS topping_id
+    FROM customer_orders co
+    JOIN pizza_recipes pr ON co.pizza_id = pr.pizza_id
+    JOIN pizza_names pn ON co.pizza_id = pn.pizza_id
+),
+adjusted_ingredients AS (
+    -- Step 2: Remove excluded toppings and add extra toppings
+    SELECT order_id, pizza_id, pizza_name, topping_id FROM exploded_ingredients
+    -- Handle exclusions (pseudo-code depending on how your schema handles split rows)
+    -- EXCEPT/UNION logic goes here if handling specific row variations
+),
+ingredient_counts AS (
+    -- Step 3: Count occurrences of each ingredient per unique pizza order
+    SELECT 
+        ai.order_id,
+        ai.pizza_name,
+        pt.topping_name,
+        COUNT(*) AS ingredient_count
+    FROM adjusted_ingredients ai
+    JOIN pizza_runner.pizza_toppings pt ON ai.topping_id = pt.topping_id
+    GROUP BY ai.order_id, ai.pizza_name, pt.topping_name
+),
+formatted_ingredients AS (
+    -- Step 4: Add the '2x' prefix if the ingredient appears more than once
+    SELECT 
+        order_id,
+        pizza_name,
+        CASE 
+            WHEN ingredient_count > 1 THEN ingredient_count || 'x' || topping_name
+            ELSE topping_name
+        END AS final_ingredient,
+        topping_name -- Kept for alphabetical sorting
+    FROM ingredient_counts
+)
+-- Step 5: Aggregate the sorted ingredients back into a single string
+SELECT 
+    order_id,
+    pizza_name || ': ' || STRING_AGG(final_ingredient, ', ' ORDER BY topping_name) AS ingredient_list
+FROM formatted_ingredients
+GROUP BY order_id, pizza_name;
+
+
+
 
 -- What is the total quantity of each ingredient used in all delivered 
 -- pizzas sorted by most frequent first?

@@ -505,7 +505,73 @@ FROM formatted_ingredients
 GROUP BY order_id, pizza_name;
 
 
-
-
 -- What is the total quantity of each ingredient used in all delivered 
 -- pizzas sorted by most frequent first?
+
+WITH cleaned_orders AS (
+    -- Step 1: Standardize the messy text data
+    SELECT 
+        co.order_id,
+        co.pizza_id,
+        ROW_NUMBER() OVER() AS unique_pizza_id,
+        CASE 
+            WHEN co.exclusions IN ('', 'None') THEN NULL 
+            ELSE NULLIF(REGEXP_REPLACE(co.exclusions, '[[:space:]]', '', 'g'), '') 
+        END AS exclusions,
+        CASE 
+            WHEN co.extras IN ('', 'None') THEN NULL 
+            ELSE NULLIF(REGEXP_REPLACE(co.extras, '[[:space:]]', '', 'g'), '') 
+        END AS extras
+    FROM customer_orders co
+    JOIN runner_orders ro ON co.order_id = ro.order_id
+    WHERE ro.cancellation IS NULL 
+),
+
+base_recipe_ingredients AS (
+    -- Step 2: Unnest and extract standard ingredients from pizza_recipes
+    SELECT 
+        co.unique_pizza_id,
+        UNNEST(STRING_TO_ARRAY(pr.toppings, ','))::INT AS topping_id,
+        1 AS ingredient_modifier
+    FROM cleaned_orders co
+    JOIN pizza_recipes pr ON co.pizza_id = pr.pizza_id
+),
+
+excluded_ingredients AS (
+    -- Step 3: Extract exclusions and assign a negative value
+    SELECT 
+        co.unique_pizza_id,
+        UNNEST(STRING_TO_ARRAY(co.exclusions, ','))::INT AS topping_id,
+        -1 AS ingredient_modifier
+    FROM cleaned_orders co
+    WHERE co.exclusions IS NOT NULL
+),
+
+extra_ingredients AS (
+    -- Step 4: Extract extras and assign a positive value
+    SELECT 
+        co.unique_pizza_id,
+        UNNEST(STRING_TO_ARRAY(co.extras, ','))::INT AS topping_id,
+        1 AS ingredient_modifier
+    FROM cleaned_orders co
+    WHERE co.extras IS NOT NULL
+),
+
+all_ingredients_combined AS (
+    -- Step 5: Stack everything cleanly together
+    SELECT * FROM base_recipe_ingredients
+    UNION ALL
+    SELECT * FROM excluded_ingredients
+    UNION ALL
+    SELECT * FROM extra_ingredients
+)
+
+-- Step 6: Calculate final totals
+SELECT 
+    pt.topping_name,
+    SUM(aic.ingredient_modifier) AS total_quantity
+FROM all_ingredients_combined aic
+JOIN pizza_toppings pt ON aic.topping_id = pt.topping_id
+GROUP BY pt.topping_name
+ORDER BY total_quantity DESC;
+
